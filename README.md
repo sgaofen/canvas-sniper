@@ -81,7 +81,7 @@ Canvas Sniper uses **Google Gemini AI** (free tier available). You'll need your 
 ## 📦 Development / Load Unpacked
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/canvas-sniper.git
+git clone https://github.com/sgaofen/canvas-sniper.git
 ```
 
 1. Open `chrome://extensions/`
