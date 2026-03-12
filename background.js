@@ -70,13 +70,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // 处理题目
 async function handleQuestion(data, tabId) {
-    const { questionType, screenshot, questionText, dropdownOptions } = data;
+    const { questionType, screenshot, questionText, dropdownOptions, choiceOptions } = data;
 
     if (!screenshot) {
         throw new Error('Screenshot data is missing or failed to capture');
     }
 
     let prompt = '';
+
+    // 所有题型都带上题目文本，帮助 AI 在多题截图中定位正确的题目
+    const questionContext = questionText
+        ? `\nTARGET QUESTION: "${questionText.substring(0, 500)}"\nThe screenshot may show multiple questions. ONLY answer the target question above.\n`
+        : '';
 
     if (questionType === 'dropdown') {
         let optionsText = '';
@@ -88,7 +93,7 @@ async function handleQuestion(data, tabId) {
         }
 
         prompt = `This is a quiz question. Read the question and select the correct answer for each dropdown.
-${optionsText}
+${questionContext}${optionsText}
 INSTRUCTIONS:
 1. For each dropdown, choose ONE option from the list above
 2. Your answer must be EXACTLY one of the options listed - copy it character for character
@@ -98,7 +103,7 @@ OUTPUT FORMAT (JSON only):
 {"answers": ["answer for dropdown 1", "answer for dropdown 2", ...]}`;
     } else if (questionType === 'text') {
         prompt = `You are an educational tutor. Look at this fill-in-the-blank question screenshot.
-
+${questionContext}
 IMPORTANT INSTRUCTIONS:
 1. Count how many blank input fields are visible in the question
 2. Provide the correct answer for EACH blank, in order from left to right or top to bottom
@@ -111,7 +116,7 @@ Return ONLY a JSON object with ALL answers:
 You MUST provide an answer for every blank. Do not skip any.`;
     } else if (questionType === 'mixed') {
         prompt = `You are an educational tutor. Look at this quiz question screenshot.
-
+${questionContext}
 This question has BOTH dropdown menus AND text input blanks.
 
 IMPORTANT INSTRUCTIONS:
@@ -126,7 +131,7 @@ Return ONLY a JSON object with ALL answers in order:
 You MUST provide an answer for EVERY blank. Do not skip any.`;
     } else if (questionType === 'essay') {
         prompt = `You are an educational tutor. Look at this essay/short-answer question screenshot.
-
+${questionContext}
 IMPORTANT INSTRUCTIONS:
 1. This is a reflective or essay question requiring a thoughtful paragraph response
 2. Write a well-structured, complete answer that addresses the question
@@ -140,11 +145,19 @@ Return ONLY a JSON object with your answer:
 Write a thoughtful, complete response that would earn full points.`;
     } else {
         // choice question
+        let optionsText = '';
+        if (choiceOptions && choiceOptions.length > 0) {
+            optionsText = '\nAVAILABLE OPTIONS:\n';
+            choiceOptions.forEach(o => {
+                optionsText += `${o.label}) ${o.text}\n`;
+            });
+        }
+
         prompt = `You are an educational tutor. Look at this multiple choice question.
+${questionContext}${optionsText}
+Identify the correct answer option(s) by their letter (A, B, C, D...).
 
-Identify the correct answer option(s).
-
-Return ONLY a JSON object: {"answers": ["A", "B", "C", ...]} where each letter corresponds to the correct option(s).`;
+Return ONLY a JSON object: {"answers": ["A"]} or {"answers": ["A", "C"]} for multiple correct answers.`;
     }
 
     // 调用 Gemini API（带重试）
@@ -187,7 +200,7 @@ async function callGeminiAPI(prompt, imageBase64) {
             ]
         }],
         generationConfig: {
-            temperature: 1.0,
+            temperature: 0,
             maxOutputTokens: 8192,
             thinkingConfig: {
                 thinkingLevel: "high"
@@ -236,29 +249,18 @@ async function callGeminiAPI(prompt, imageBase64) {
             throw new Error('No response from API');
         }
 
-        // 提取文本（跳过 thinking 部分，只取最后一个 text part）
-        const parts = result.candidates[0].content.parts;
-        let text = '';
-        for (let i = parts.length - 1; i >= 0; i--) {
-            if (parts[i].text) {
-                text = parts[i].text;
-                break;
-            }
-        }
+        // 直接取回复文本（无 thinkingConfig，响应只有一个 text part）
+        let text = result.candidates[0].content.parts[0].text;
         console.log('[Sniper BG] 原始回复:', text);
 
-        // 清理 Markdown 代码块标记
+        // 清理 Markdown 代码块
         text = text.replace(/```json/g, '').replace(/```/g, '').trim();
 
         // 解析 JSON
         try {
-            const start = text.indexOf('{');
-            const end = text.lastIndexOf('}');
-            if (start !== -1 && end !== -1) {
-                const jsonStr = text.substring(start, end + 1);
-                const parsed = JSON.parse(jsonStr);
-                if (!parsed.answers) parsed.answers = [];
-                return parsed;
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                return JSON.parse(jsonMatch[0]);
             }
         } catch (e) {
             console.error('JSON parse error:', e);

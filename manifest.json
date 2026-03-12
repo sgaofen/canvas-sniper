@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Canvas Sniper",
-    "version": "2.0",
+    "version": "2.2",
     "description": "Canvas Quiz 自动答题助手",
     "permissions": [
         "activeTab",

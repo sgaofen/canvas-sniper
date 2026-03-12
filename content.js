@@ -428,7 +428,7 @@ async function handleDoubleClick(e) {
         const screenshot = await captureQuestion(question);
         timings['2. 截图'] = (performance.now() - stepStart).toFixed(1) + 'ms';
 
-        // 步骤 3: 提取下拉选项
+        // 步骤 3: 提取选项
         stepStart = performance.now();
         const dropdownOptions = [];
         question.querySelectorAll('select').forEach((select, idx) => {
@@ -440,6 +440,19 @@ async function handleDoubleClick(e) {
                 options: options
             });
         });
+
+        // 提取选择题选项文本
+        const choiceOptions = [];
+        if (questionType === 'choice') {
+            question.querySelectorAll('.answer').forEach((answer, idx) => {
+                const label = String.fromCharCode(65 + idx);
+                const text = (answer.querySelector('.answer_text')?.innerText ||
+                              answer.querySelector('.answer_label')?.innerText ||
+                              answer.innerText || '').trim();
+                if (text) choiceOptions.push({ label, text });
+            });
+            console.log('[Sniper] 选择题选项:', choiceOptions.map(o => `${o.label}) ${o.text}`));
+        }
         timings['3. 提取选项'] = (performance.now() - stepStart).toFixed(1) + 'ms';
 
         if (cancelRequested) { cleanup(); return; }
@@ -452,7 +465,8 @@ async function handleDoubleClick(e) {
                 questionType,
                 screenshot,
                 questionText: question.innerText.substring(0, 1000),
-                dropdownOptions: dropdownOptions
+                dropdownOptions: dropdownOptions,
+                choiceOptions: choiceOptions
             }
         }, 3);
         timings['4. AI请求+响应'] = (performance.now() - stepStart).toFixed(1) + 'ms';
@@ -579,14 +593,31 @@ async function performHumanActions(question, type, answers) {
 
     // === 选择题（单选 + 多选） ===
     if (type === 'choice') {
-        const answerLabels = answers.map(a => String(a).toUpperCase());
+        const answerLabels = answers.map(a => String(a).trim());
         const choices = question.querySelectorAll('.answer');
         for (let index = 0; index < choices.length; index++) {
             if (cancelRequested) return;
             const letter = String.fromCharCode(65 + index);
-            if (answerLabels.includes(letter)) {
+            const choiceText = (choices[index].querySelector('.answer_text')?.innerText ||
+                                choices[index].querySelector('.answer_label')?.innerText ||
+                                choices[index].innerText || '').trim();
+
+            // 字母匹配 或 文本匹配
+            let shouldSelect = answerLabels.some(a => a.toUpperCase() === letter);
+            if (!shouldSelect && choiceText) {
+                shouldSelect = answerLabels.some(a => {
+                    const na = a.toLowerCase();
+                    const nc = choiceText.toLowerCase();
+                    return na.length > 1 && (nc.includes(na) || na.includes(nc));
+                });
+            }
+
+            if (shouldSelect) {
                 await ghostCursor.moveTo(choices[index]);
                 await ghostCursor.click();
+                const input = choices[index].querySelector('input');
+                if (input && !input.checked) input.click();
+                console.log('[Sniper] ✓ 选择:', letter, choiceText);
                 await new Promise(r => setTimeout(r, Math.random() * 400 + 200));
             }
         }
@@ -781,13 +812,28 @@ function fillAnswersFast(question, type, answers) {
 
     // === 选择题（单选 + 多选） ===
     if (type === 'choice') {
-        const answerLabels = answers.map(a => String(a).toUpperCase());
+        const answerLabels = answers.map(a => String(a).trim());
         const choices = question.querySelectorAll('.answer');
         choices.forEach((choice, index) => {
             const letter = String.fromCharCode(65 + index);
-            if (answerLabels.includes(letter)) {
+            const choiceText = (choice.querySelector('.answer_text')?.innerText ||
+                                choice.querySelector('.answer_label')?.innerText ||
+                                choice.innerText || '').trim();
+
+            // 字母匹配 或 文本匹配
+            let shouldSelect = answerLabels.some(a => a.toUpperCase() === letter);
+            if (!shouldSelect && choiceText) {
+                shouldSelect = answerLabels.some(a => {
+                    const na = a.toLowerCase();
+                    const nc = choiceText.toLowerCase();
+                    return na.length > 1 && (nc.includes(na) || na.includes(nc));
+                });
+            }
+
+            if (shouldSelect) {
                 const input = choice.querySelector('input');
                 if (input && !input.checked) input.click();
+                console.log('[Sniper] ✓ 选择:', letter, choiceText);
             }
         });
     }
